@@ -7,8 +7,25 @@ import { getPatients } from "@/lib/db";
 export default function DoctorPatientsPage() {
   const [patients, setPatients] = useState([]);
   const [query, setQuery] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => setPatients(getPatients()), []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await getPatients();
+        if (!cancelled) setPatients(result);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load patients.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const visiblePatients = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -22,6 +39,7 @@ export default function DoctorPatientsPage() {
         <h1 className="text-2xl font-bold text-ink">Patients</h1>
         <p className="text-sm text-ink-2">Open a patient record to review history and start or continue a consultation.</p>
       </div>
+      {error && <p className="text-sm text-rejected-text">{error}</p>}
       <div className="card p-5">
         <label className="form-label" htmlFor="patient-search">Search patient</label>
         <input id="patient-search" className="form-input max-w-md" placeholder="Name or contact number" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -41,7 +59,13 @@ export default function DoctorPatientsPage() {
                   <td className="px-5 py-3 text-right"><Link href={`/doctor/patient?patientId=${patient.id}`} className="text-primary font-semibold">View record</Link></td>
                 </tr>
               ))}
-              {visiblePatients.length === 0 && <tr><td colSpan="4" className="px-5 py-8 text-center text-ink-3">No patients found.</td></tr>}
+              {visiblePatients.length === 0 && (
+                <tr>
+                  <td colSpan="4" className="px-5 py-8 text-center text-ink-3">
+                    {loading ? "Loading patients..." : error ? "Couldn't load patients." : "No patients found."}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

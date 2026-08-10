@@ -1,28 +1,61 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { getSessionPatientId } from "@/lib/auth";
-import { getPatientById, getDoctors } from "@/lib/db";
+import { getDoctors } from "@/lib/db";
 import VisitForm from "@/components/VisitForm";
+import LoadingState from "@/components/LoadingState";
+import { useCurrentPatient } from "@/hooks/useCurrentPatient";
 
 export default function NewVisitPage() {
-  const router = useRouter();
-  const [patient, setPatient] = useState(null);
+  const { patient, error: patientError } = useCurrentPatient();
   const [doctor, setDoctor] = useState(null);
+  const [error, setError] = useState("");
+  const [noDoctor, setNoDoctor] = useState(false);
 
   useEffect(() => {
-    const patientId = getSessionPatientId();
-    const p = patientId ? getPatientById(patientId) : null;
-    if (!p) {
-      router.push("/");
-      return;
-    }
-    setPatient(p);
-    setDoctor(getDoctors()[0]);
-  }, [router]);
+    if (!patient) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const doctors = await getDoctors();
+        if (cancelled) return;
+        if (doctors.length === 0) {
+          setNoDoctor(true);
+          return;
+        }
+        setDoctor(doctors[0]);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load booking details. Please refresh the page.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [patient]);
 
-  if (!patient || !doctor) return null;
+  if (patientError || error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <p className="text-sm text-rejected-text">{patientError || error}</p>
+      </div>
+    );
+  }
+
+  if (noDoctor) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <p className="text-sm text-ink-3 text-center">No doctor is available for booking right now. Please try again later.</p>
+      </div>
+    );
+  }
+
+  if (!patient || !doctor) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <LoadingState label="Loading booking details..." />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-10">

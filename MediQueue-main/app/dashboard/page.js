@@ -2,33 +2,51 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { getSessionPatientId } from "@/lib/auth";
-import { getPatientById, getConsultationHistoryForPatient, getPendingDuesForPatient } from "@/lib/db";
+import { getConsultationHistoryForPatient, getPendingDuesForPatient } from "@/lib/db";
 import StatusBadge from "@/components/StatusBadge";
 import QueueStatus from "@/components/QueueStatus";
 import HealthProfileCard from "@/components/HealthProfileCard";
 import LogoutButton from "@/components/LogoutButton";
+import LoadingState from "@/components/LoadingState";
+import { useCurrentPatient } from "@/hooks/useCurrentPatient";
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const [patient, setPatient] = useState(null);
+  const { patient, error: patientError } = useCurrentPatient();
   const [history, setHistory] = useState([]);
   const [pendingDues, setPendingDues] = useState(0);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const patientId = getSessionPatientId();
-    const p = patientId ? getPatientById(patientId) : null;
-    if (!p) {
-      router.push("/");
-      return;
-    }
-    setPatient(p);
-    setHistory(getConsultationHistoryForPatient(p.id));
-    setPendingDues(getPendingDuesForPatient(p.id));
-  }, [router]);
+    if (!patient) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setHistory(await getConsultationHistoryForPatient(patient.id));
+        setPendingDues(await getPendingDuesForPatient(patient.id));
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load your dashboard. Please refresh the page.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [patient]);
 
-  if (!patient) return null;
+  if (patientError || error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <p className="text-sm text-rejected-text">{patientError || error}</p>
+      </div>
+    );
+  }
+
+  if (!patient) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <LoadingState label="Loading your dashboard..." />
+      </div>
+    );
+  }
 
   const active = history.filter((h) => h.visit.status !== "completed");
   const previous = history.filter((h) => h.visit.status === "completed");

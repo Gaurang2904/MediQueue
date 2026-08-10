@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { getPatientById, getConsultationHistoryForPatient } from "@/lib/db";
 import StatusBadge from "@/components/StatusBadge";
 import HealthProfileCard from "@/components/HealthProfileCard";
+import LoadingState from "@/components/LoadingState";
 
 function DoctorPatientContent() {
   const searchParams = useSearchParams();
@@ -13,20 +14,34 @@ function DoctorPatientContent() {
   const [patient, setPatient] = useState(null);
   const [history, setHistory] = useState([]);
   const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!patientId) return;
-    const p = getPatientById(patientId);
-    if (!p) {
-      setNotFound(true);
-      return;
-    }
-    setPatient(p);
-    setHistory(getConsultationHistoryForPatient(patientId));
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await getPatientById(patientId);
+        if (cancelled) return;
+        if (!p) {
+          setNotFound(true);
+          return;
+        }
+        setPatient(p);
+        setHistory(await getConsultationHistoryForPatient(patientId));
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load patient record. Please refresh the page.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [patientId]);
 
+  if (error) return <p className="text-sm text-rejected-text">{error}</p>;
   if (notFound) return <p className="text-sm text-ink-3">Patient not found.</p>;
-  if (!patient) return null;
+  if (!patientId) return <p className="text-sm text-ink-3">Missing patient reference.</p>;
+  if (!patient) return <LoadingState label="Loading patient record..." />;
 
   return (
     <div className="space-y-6">

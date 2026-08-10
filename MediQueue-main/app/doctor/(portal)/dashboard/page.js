@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getSessionDoctorId } from "@/lib/auth";
-import { getDoctor, getDoctorDashboard, todayStr } from "@/lib/db";
+import { getDoctorDashboard, todayStr } from "@/lib/db";
 import StatusBadge from "@/components/StatusBadge";
 import DoctorStatusToggle from "@/components/DoctorStatusToggle";
+import LoadingState from "@/components/LoadingState";
+import { useCurrentDoctor } from "@/hooks/useCurrentDoctor";
 
 function VisitRow({ v }) {
   return (
@@ -23,18 +24,28 @@ function VisitRow({ v }) {
 }
 
 export default function DoctorDashboardPage() {
-  const [doctor, setDoctor] = useState(null);
+  const doctor = useCurrentDoctor();
   const [dashboard, setDashboard] = useState(null);
+  const [error, setError] = useState("");
   const date = todayStr();
 
   useEffect(() => {
-    const doctorId = getSessionDoctorId();
-    if (!doctorId) return;
-    setDoctor(getDoctor(doctorId));
-    setDashboard(getDoctorDashboard(doctorId, date));
-  }, [date]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const dash = await getDoctorDashboard(doctor.id, date);
+        if (!cancelled) setDashboard(dash);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load your dashboard. Please refresh the page.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [doctor.id, date]);
 
-  if (!doctor || !dashboard) return null;
+  if (error) return <p className="text-sm text-rejected-text">{error}</p>;
+  if (!dashboard) return <LoadingState label="Loading your dashboard..." />;
 
   return (
     <div className="space-y-6">
@@ -43,7 +54,7 @@ export default function DoctorDashboardPage() {
           <h1 className="text-2xl font-bold text-ink">Today&apos;s Dashboard</h1>
           <p className="text-ink-2 text-sm">{date}</p>
         </div>
-        <DoctorStatusToggle status={doctor.status} />
+        <DoctorStatusToggle doctorId={doctor.id} status={doctor.status} />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

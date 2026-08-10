@@ -21,12 +21,14 @@ export default function PaymentPanel({ visit, payment, doctor }) {
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      const updated = uploadPaymentScreenshot(visit.id, dataUrl);
+      const updated = await uploadPaymentScreenshot(visit.id, dataUrl);
       if (!updated) {
         setError("Upload failed.");
         return;
       }
       setStatus(updated.status);
+    } catch (err) {
+      setError(err.message || "Upload failed. Please try again.");
     } finally {
       setUploading(false);
     }
@@ -44,15 +46,19 @@ export default function PaymentPanel({ visit, payment, doctor }) {
       </div>
 
       {payment.mode === "online" ? (
-        <div className="text-center space-y-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={doctor.qrCodeUrl} alt="Payment QR code" className="mx-auto w-40 h-40 border border-border rounded-lg" />
-          <p className="text-xs text-ink-3">Scan the QR code with any UPI app to pay {doctor.name}, then upload your payment screenshot below.</p>
-          <label className="form-label">Upload Payment Screenshot</label>
-          <input type="file" accept="image/*" className="form-input" onChange={handleUpload} disabled={uploading || status !== "pending"} />
-          {error && <p className="text-sm text-rejected-text">{error}</p>}
-          {status !== "pending" && <p className="text-sm text-completed-text">Screenshot received. Awaiting doctor verification.</p>}
-        </div>
+        doctor ? (
+          <div className="text-center space-y-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={doctor.qrCodeUrl} alt="Payment QR code" className="mx-auto w-40 h-40 border border-border rounded-lg" />
+            <p className="text-xs text-ink-3">Scan the QR code with any UPI app to pay {doctor.name}, then upload your payment screenshot below.</p>
+            <label className="form-label" htmlFor="payment-screenshot">Upload Payment Screenshot</label>
+            <input id="payment-screenshot" type="file" accept="image/*" className="form-input" onChange={handleUpload} disabled={uploading || status !== "pending"} />
+            {error && <p className="text-sm text-rejected-text">{error}</p>}
+            {status !== "pending" && <p className="text-sm text-completed-text">Screenshot received. Awaiting doctor verification.</p>}
+          </div>
+        ) : (
+          <p className="text-sm text-rejected-text text-center">Doctor details unavailable. Please contact the clinic to complete payment.</p>
+        )
       ) : (
         <p className="text-sm text-ink-2 text-center">Please pay ₹{payment.amount} in cash at the counter. The doctor will confirm once received.</p>
       )}

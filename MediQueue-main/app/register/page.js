@@ -4,12 +4,22 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createPatient } from "@/lib/db";
 import { setSessionPatientId } from "@/lib/auth";
+import { signUp, deleteAccount } from "@/lib/firebaseAuth";
+import { auth } from "@/lib/firebase"; // TEMP DIAGNOSTIC import — remove after RLS investigation
 import Link from "next/link";
+
+const FIREBASE_ERROR_MESSAGES = {
+  "auth/email-already-in-use": "An account with this email already exists. Try signing in instead.",
+  "auth/invalid-email": "Enter a valid email address.",
+  "auth/weak-password": "Password must be at least 6 characters.",
+};
 
 function RegisterForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [form, setForm] = useState({
+    email: "",
+    password: "",
     name: "",
     address: "",
     contact: searchParams.get("contact") || "",
@@ -24,8 +34,6 @@ function RegisterForm() {
     dietaryRestrictions: "",
     weight: "",
     height: "",
-    bpSystolic: "",
-    bpDiastolic: "",
   });
   const [photoDataUrl, setPhotoDataUrl] = useState(null);
   const [error, setError] = useState("");
@@ -51,9 +59,18 @@ function RegisterForm() {
       return;
     }
     setLoading(true);
+    let credential;
     try {
-      const patient = createPatient({
+      credential = await signUp(form.email, form.password);
+      // TEMP DIAGNOSTIC — remove after RLS investigation.
+      console.log(
+        "[diag:register] credential.user.uid=%s auth.currentUser?.uid=%s (these should match)",
+        credential.user.uid,
+        auth.currentUser?.uid
+      );
+      const patient = await createPatient({
         ...form,
+        firebaseUid: credential.user.uid,
         photoDataUrl,
         pastDiseaseHistory: form.pastDiseaseHistory === "yes",
         allergies: form.allergies === "yes",
@@ -62,7 +79,18 @@ function RegisterForm() {
       setSessionPatientId(patient.id);
       router.push("/visit/new");
     } catch (err) {
-      setError(err.message || "Registration failed.");
+      if (credential) {
+        // signUp succeeded but createPatient failed — roll back the Firebase account
+        // instead of leaving an orphaned auth user with no patient row, which would
+        // otherwise permanently block re-registering with this email ("email already
+        // in use") with no way to recover.
+        try {
+          await deleteAccount(credential.user);
+        } catch (rollbackErr) {
+          console.error("Failed to roll back Firebase account after registration failure:", rollbackErr);
+        }
+      }
+      setError(FIREBASE_ERROR_MESSAGES[err.code] || err.message || "Registration failed.");
     } finally {
       setLoading(false);
     }
@@ -77,6 +105,18 @@ function RegisterForm() {
         </div>
 
         <form onSubmit={handleSubmit} className="card p-6 space-y-5">
+          <div className="form-section-title">Account</div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="form-label" htmlFor="email">Email</label>
+              <input id="email" type="email" className="form-input" required value={form.email} onChange={(e) => update("email", e.target.value)} />
+            </div>
+            <div>
+              <label className="form-label" htmlFor="password">Password</label>
+              <input id="password" type="password" minLength={6} className="form-input" required value={form.password} onChange={(e) => update("password", e.target.value)} />
+            </div>
+          </div>
+
           <div className="form-section-title">Personal Information</div>
 
           <div>
@@ -198,14 +238,6 @@ function RegisterForm() {
               <div>
                 <label className="form-label" htmlFor="height">Height (cm) (Optional)</label>
                 <input id="height" type="number" step="0.1" min="30" className="form-input" value={form.height} onChange={(e) => update("height", e.target.value)} />
-              </div>
-              <div>
-                <label className="form-label" htmlFor="bpSystolic">Blood Pressure — Systolic (mmHg) (Optional)</label>
-                <input id="bpSystolic" type="number" min="40" max="250" className="form-input" value={form.bpSystolic} onChange={(e) => update("bpSystolic", e.target.value)} />
-              </div>
-              <div>
-                <label className="form-label" htmlFor="bpDiastolic">Blood Pressure — Diastolic (mmHg) (Optional)</label>
-                <input id="bpDiastolic" type="number" min="30" max="160" className="form-input" value={form.bpDiastolic} onChange={(e) => update("bpDiastolic", e.target.value)} />
               </div>
             </div>
           </div>

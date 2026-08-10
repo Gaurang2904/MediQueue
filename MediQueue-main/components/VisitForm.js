@@ -2,14 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getSlotsForDate, createVisit } from "@/lib/db";
+import { getSlotsForDate, createVisit, todayStr } from "@/lib/db";
 
 const ILLNESS_OPTIONS = ["Fever", "Cold & Cough", "Headache", "Body Pain", "Stomach Ache", "Other"];
-
-function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 export default function VisitForm({ patient, doctor }) {
   const router = useRouter();
@@ -29,8 +24,19 @@ export default function VisitForm({ patient, doctor }) {
 
   useEffect(() => {
     if (!date) return;
-    setSlots(getSlotsForDate(doctor.id, date));
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await getSlotsForDate(doctor.id, date);
+        if (!cancelled) setSlots(result);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load available slots for this date.");
+      }
+    })();
     setSlot("");
+    return () => {
+      cancelled = true;
+    };
   }, [date, doctor.id]);
 
   async function handleSubmit(e) {
@@ -42,7 +48,7 @@ export default function VisitForm({ patient, doctor }) {
     }
     setLoading(true);
     try {
-      createVisit({
+      await createVisit({
         patientId: patient.id,
         doctorId: doctor.id,
         date,
@@ -104,6 +110,7 @@ export default function VisitForm({ patient, doctor }) {
               type="button"
               key={s.slot}
               disabled={s.isFull}
+              aria-pressed={slot === s.slot}
               onClick={() => setSlot(s.slot)}
               className={`text-xs rounded-md border px-2 py-2 font-medium transition-colors ${
                 s.isFull

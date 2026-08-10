@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getVisit, getPaymentForVisit, getDoctor } from "@/lib/db";
 import PaymentPanel from "@/components/PaymentPanel";
+import LoadingState from "@/components/LoadingState";
 
 function PaymentContent() {
   const searchParams = useSearchParams();
@@ -12,21 +13,41 @@ function PaymentContent() {
   const [payment, setPayment] = useState(null);
   const [doctor, setDoctor] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!visitId) return;
-    const v = getVisit(visitId);
-    if (!v) {
-      setNotFound(true);
-      return;
-    }
-    setVisit(v);
-    setPayment(getPaymentForVisit(visitId));
-    setDoctor(getDoctor(v.doctorId));
+    let cancelled = false;
+    (async () => {
+      try {
+        const v = await getVisit(visitId);
+        if (cancelled) return;
+        if (!v) {
+          setNotFound(true);
+          return;
+        }
+        setVisit(v);
+        setPayment(await getPaymentForVisit(visitId));
+        setDoctor(await getDoctor(v.doctorId));
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load payment details. Please refresh the page.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [visitId]);
 
+  if (error) return <p className="text-sm text-rejected-text text-center">{error}</p>;
   if (notFound) return <p className="text-sm text-ink-3 text-center">Visit not found.</p>;
-  if (!visit) return null;
+  if (!visitId) return <p className="text-sm text-ink-3 text-center">Missing visit reference. Please go back to your dashboard and try again.</p>;
+  if (!visit) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <LoadingState label="Loading payment details..." />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-10">

@@ -4,3 +4,7 @@ node_modules/
 token.json
 credentials.json
 .next/
+out/
+
+# Local Netlify folder
+.netlify

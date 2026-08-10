@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { getVisit, getPatientById, getPaymentForVisit } from "@/lib/db";
 import StatusBadge from "@/components/StatusBadge";
 import VerifyPaymentButton from "@/components/VerifyPaymentButton";
+import LoadingState from "@/components/LoadingState";
 
 function DoctorPaymentContent() {
   const searchParams = useSearchParams();
@@ -12,21 +13,35 @@ function DoctorPaymentContent() {
   const [patient, setPatient] = useState(null);
   const [payment, setPayment] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!visitId) return;
-    const visit = getVisit(visitId);
-    const p = visit ? getPaymentForVisit(visitId) : null;
-    if (!visit || !p) {
-      setNotFound(true);
-      return;
-    }
-    setPatient(getPatientById(visit.patientId));
-    setPayment(p);
+    let cancelled = false;
+    (async () => {
+      try {
+        const visit = await getVisit(visitId);
+        const p = visit ? await getPaymentForVisit(visitId) : null;
+        if (cancelled) return;
+        if (!visit || !p) {
+          setNotFound(true);
+          return;
+        }
+        setPatient(await getPatientById(visit.patientId));
+        setPayment(p);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load payment details. Please refresh the page.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [visitId]);
 
+  if (error) return <p className="text-sm text-rejected-text">{error}</p>;
   if (notFound) return <p className="text-sm text-ink-3">Payment not found.</p>;
-  if (!payment) return null;
+  if (!visitId) return <p className="text-sm text-ink-3">Missing visit reference.</p>;
+  if (!payment) return <LoadingState label="Loading payment details..." />;
 
   return (
     <div className="max-w-md space-y-4">

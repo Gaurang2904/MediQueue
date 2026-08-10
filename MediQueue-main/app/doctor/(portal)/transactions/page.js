@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSessionDoctorId } from "@/lib/auth";
 import { getTransactionMetrics } from "@/lib/db";
+import LoadingState from "@/components/LoadingState";
+import { useCurrentDoctor } from "@/hooks/useCurrentDoctor";
 
 const RANGES = [
   { key: "today", label: "Today" },
@@ -12,17 +13,30 @@ const RANGES = [
 ];
 
 export default function TransactionsPage() {
+  const doctor = useCurrentDoctor();
   const [range, setRange] = useState("today");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [metrics, setMetrics] = useState(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (range === "custom" && (!from || !to)) return;
-    const doctorId = getSessionDoctorId();
-    if (!doctorId) return;
-    setMetrics(getTransactionMetrics(doctorId, { range, from, to }));
-  }, [range, from, to]);
+    let cancelled = false;
+    setMetrics(null);
+    setError("");
+    (async () => {
+      try {
+        const result = await getTransactionMetrics(doctor.id, { range, from, to });
+        if (!cancelled) setMetrics(result);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load transaction metrics. Please try again.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [doctor.id, range, from, to]);
 
   return (
     <div className="space-y-6">
@@ -52,6 +66,9 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
+
+      {error && <p className="text-sm text-rejected-text">{error}</p>}
+      {!metrics && !error && <LoadingState label="Loading transaction metrics..." />}
 
       {metrics && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
