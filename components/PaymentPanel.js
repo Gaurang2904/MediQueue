@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { uploadPaymentScreenshot } from "@/lib/db";
 import StatusBadge from "@/components/StatusBadge";
+import { fileToCompressedDataUrl } from "@/lib/image";
 
 export default function PaymentPanel({ visit, payment, doctor, consultation }) {
   const [uploading, setUploading] = useState(false);
@@ -18,12 +19,10 @@ export default function PaymentPanel({ visit, payment, doctor, consultation }) {
     setUploading(true);
     setError("");
     try {
-      const reader = new FileReader();
-      const dataUrl = await new Promise((resolve, reject) => {
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      // Downscaled before encoding -- this lands in payments.screenshot_data_url as
+      // base64, so an unresized phone photo would put ~6.7 MB in the row that every
+      // later payment query reads back.
+      const dataUrl = await fileToCompressedDataUrl(file);
       const updated = await uploadPaymentScreenshot(visit.id, dataUrl);
       if (!updated) {
         setError("Upload failed.");
@@ -63,18 +62,25 @@ export default function PaymentPanel({ visit, payment, doctor, consultation }) {
       )}
 
       {payment.mode === "online" ? (
-        doctor ? (
+        !doctor ? (
+          <p className="text-sm text-rejected-text text-center">Doctor details unavailable. Please contact the clinic to complete payment.</p>
+        ) : !doctor.qrCodeUrl ? (
+          // A doctor who hasn't uploaded a QR yet (Doctor Dashboard -> Profile -> Payment
+          // QR Code) used to render a broken <img> here with an upload box under it,
+          // inviting a screenshot of a payment the patient had no way to make.
+          <p className="text-sm text-ink-2 text-center">
+            {doctor.name} hasn&apos;t set up online payments yet. Please pay ₹{payment.amount} in cash at the counter.
+          </p>
+        ) : (
           <div className="text-center space-y-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={doctor.qrCodeUrl} alt="Payment QR code" className="mx-auto w-40 h-40 border border-border rounded-lg" />
+            <img src={doctor.qrCodeUrl} alt={`Payment QR code for ${doctor.name}`} className="mx-auto w-40 h-40 object-contain border border-border rounded-lg bg-white" />
             <p className="text-xs text-ink-3">Scan the QR code with any UPI app to pay {doctor.name}, then upload your payment screenshot below.</p>
             <label className="form-label" htmlFor="payment-screenshot">Upload Payment Screenshot</label>
             <input id="payment-screenshot" type="file" accept="image/*" className="form-input" onChange={handleUpload} disabled={uploading || status !== "pending"} />
             {error && <p className="text-sm text-rejected-text">{error}</p>}
             {status !== "pending" && <p className="text-sm text-completed-text">Screenshot received. Awaiting doctor verification.</p>}
           </div>
-        ) : (
-          <p className="text-sm text-rejected-text text-center">Doctor details unavailable. Please contact the clinic to complete payment.</p>
         )
       ) : (
         <p className="text-sm text-ink-2 text-center">Please pay ₹{payment.amount} in cash at the counter. The doctor will confirm once received.</p>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useCurrentDoctor } from "@/hooks/useCurrentDoctor";
 import { updateDoctorProfile } from "@/lib/db";
+import { fileToCompressedDataUrl } from "@/lib/image";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -21,12 +22,29 @@ export default function DoctorProfilePage() {
   const [phone, setPhone] = useState(doctor.phone || "");
   const [gstin, setGstin] = useState(doctor.gstin || "");
   const [consultationFee, setConsultationFee] = useState(doctor.consultationFee ?? 500);
+  const [qrCodeUrl, setQrCodeUrl] = useState(doctor.qrCodeUrl || "");
+  const [qrError, setQrError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   function toggleDay(day) {
     setAvailableDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
+  }
+
+  // Held in state and written by the same Save Changes submit as everything else, so a
+  // doctor who picks the wrong image can just pick another (or Remove) before saving.
+  async function handleQrChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setQrError("");
+    setSuccess("");
+    try {
+      setQrCodeUrl(await fileToCompressedDataUrl(file));
+    } catch (err) {
+      setQrError(err.message || "Could not read that image. Please try another.");
+    }
   }
 
   async function handleSubmit(e) {
@@ -53,6 +71,7 @@ export default function DoctorProfilePage() {
         phone,
         gstin,
         consultationFee: Number(consultationFee),
+        qrCodeUrl,
         slotConfig: {
           startTime,
           endTime,
@@ -141,6 +160,45 @@ export default function DoctorProfilePage() {
               ))}
             </div>
           </div>
+        </div>
+
+        <div className="card p-5 space-y-3">
+          <h2 className="font-semibold text-ink">Payment QR Code</h2>
+          <p className="text-xs text-ink-3">
+            Shown to patients who choose to pay online, so they can scan it and pay you directly. Upload a
+            screenshot of your UPI QR code from any payment app. Until you add one, patients booking with you
+            can only pay in cash.
+          </p>
+
+          {qrCodeUrl ? (
+            <div className="flex items-start gap-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={qrCodeUrl}
+                alt="Your payment QR code"
+                className="w-40 h-40 object-contain border border-border rounded-lg bg-white"
+              />
+              <div className="space-y-2">
+                <label className="btn-outline cursor-pointer inline-block" htmlFor="qrCode">Replace</label>
+                <input id="qrCode" type="file" accept="image/*" className="sr-only" onChange={handleQrChange} />
+                <button
+                  type="button"
+                  onClick={() => { setQrCodeUrl(""); setQrError(""); setSuccess(""); }}
+                  className="block text-xs font-semibold text-rejected-text"
+                >
+                  Remove
+                </button>
+                <p className="text-xs text-ink-3 max-w-[16rem]">Remember to Save Changes below.</p>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="form-label" htmlFor="qrCode">Upload QR Code</label>
+              <input id="qrCode" type="file" accept="image/*" className="form-input" onChange={handleQrChange} />
+            </div>
+          )}
+
+          {qrError && <p className="text-sm text-rejected-text">{qrError}</p>}
         </div>
 
         {error && <p className="text-sm text-rejected-text">{error}</p>}
