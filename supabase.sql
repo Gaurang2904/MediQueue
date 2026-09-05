@@ -154,6 +154,21 @@ alter table public.registration_staff
   add column if not exists doctor_id uuid references public.doctors(id) on delete cascade,
   add column if not exists active boolean not null default true;
 
+-- Admin: a small operations role that provisions doctor accounts, and registration
+-- desk accounts under any doctor. Deliberately has NO clinical reach -- no policy in
+-- section 5 grants an admin patients, visits, consultations or payments, so an admin
+-- account cannot read a single medical record. It creates logins; it does not use them.
+-- Admin rows are created out-of-band (see the bootstrap note at the bottom of this
+-- file) -- there is no policy allowing an admin to be created from the app, so an
+-- admin can never mint another admin.
+create table if not exists public.admins (
+  id uuid primary key default gen_random_uuid(),
+  firebase_uid text unique,
+  name text not null,
+  email text unique not null,
+  created_at timestamptz not null default now()
+);
+
 -- Minimal forensic trail for security-sensitive actions (patient creation by staff,
 -- visit creation by staff, account linking, payment verification). Deliberately no
 -- RLS policy and no GRANT to `authenticated` at all below -- this table is completely
@@ -205,6 +220,15 @@ language sql stable as $$ select nullif(auth.jwt()->>'sub', '') $$;
 create or replace function public.is_doctor() returns boolean
 language sql stable as $$
   select exists (select 1 from public.doctors d where d.firebase_uid = public.current_firebase_uid())
+$$;
+
+-- Security definer so it can be used inside policies on OTHER tables (doctors,
+-- registration_staff) without those evaluations needing their own read access to
+-- `admins` -- and so it can never recurse back through admins' own policy. Same
+-- reasoning as patient_has_visit_with_registration_doctor below.
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.admins a where a.firebase_uid = public.current_firebase_uid())
 $$;
 
 -- Returns the calling registration desk staff member's doctor_id, or null if the
@@ -720,6 +744,7 @@ alter table public.visits enable row level security;
 alter table public.consultations enable row level security;
 alter table public.payments enable row level security;
 alter table public.registration_staff enable row level security;
+alter table public.admins enable row level security;
 alter table public.audit_log enable row level security;
 -- No policy is created for audit_log below, deliberately -- RLS enabled + zero
 -- policies means the `authenticated` role gets zero rows/zero writes via the API no
@@ -743,11 +768,17 @@ alter table public.audit_log enable row level security;
 -- account creation to "your own clinic only").
 drop policy if exists "doctors_select" on public.doctors;
 drop policy if exists "doctors_update_own" on public.doctors;
+drop policy if exists "doctors_insert_admin" on public.doctors;
 
 create policy "doctors_select" on public.doctors for select to authenticated using (true);
 create policy "doctors_update_own" on public.doctors for update to authenticated
   using (firebase_uid = public.current_firebase_uid())
   with check (firebase_uid = public.current_firebase_uid());
+-- Admin provisioning: creating a doctor row is the one write an admin makes here. No
+-- update or delete policy -- an admin cannot edit a doctor's profile or fee, and
+-- cannot remove a doctor (which would cascade away their visits and payments).
+create policy "doctors_insert_admin" on public.doctors for insert to authenticated
+  with check (public.is_admin());
 
 -- ---------- patients ----------
 -- Own row; any row if you're a doctor (doctor portal needs to view records); any row
@@ -855,6 +886,8 @@ create policy "payments_select_registration" on public.payments for select to au
 -- a doctor see another doctor's staff, and no policy letting registration desk staff
 -- write to this table at all (account management is doctor-only, staff never manage
 -- themselves or anyone else).
+drop policy if exists "registration_staff_select_admin" on public.registration_staff;
+drop policy if exists "registration_staff_insert_admin" on public.registration_staff;
 drop policy if exists "registration_staff_select_own" on public.registration_staff;
 drop policy if exists "registration_staff_select_own_doctor" on public.registration_staff;
 drop policy if exists "registration_staff_insert_own_doctor" on public.registration_staff;
@@ -873,6 +906,25 @@ create policy "registration_staff_update_own_doctor" on public.registration_staf
 create policy "registration_staff_delete_own_doctor" on public.registration_staff for delete to authenticated
   using (exists (select 1 from public.doctors d where d.id = registration_staff.doctor_id and d.firebase_uid = public.current_firebase_uid()));
 
+-- Admin: can see and create desk accounts under ANY doctor (that is the whole point of
+-- the admin page). No update or delete policy -- deactivating and removing a desk
+-- account stays with the doctor who owns it.
+create policy "registration_staff_select_admin" on public.registration_staff for select to authenticated
+  using (public.is_admin());
+create policy "registration_staff_insert_admin" on public.registration_staff for insert to authenticated
+  with check (public.is_admin());
+
+
+-- ---------- admins ----------
+-- An admin can read their own row, which is all the admin login needs. There is no
+-- policy for anyone else to read this table, and none at all for insert/update/delete
+-- -- admin accounts are provisioned by hand in the Supabase dashboard, so the app can
+-- never create or escalate one.
+drop policy if exists "admins_select_own" on public.admins;
+
+create policy "admins_select_own" on public.admins for select to authenticated
+  using (firebase_uid = public.current_firebase_uid());
+
 
 -- =====================================================================================
 -- 6. GRANTS
@@ -881,7 +933,11 @@ create policy "registration_staff_delete_own_doctor" on public.registration_staf
 -- without a matching policy yields zero visible rows, not a bypass). Re-granting an
 -- already-held privilege is a no-op, so this section is safe to re-run as-is.
 
-grant select, update on public.doctors to authenticated;
+-- insert is for admin doctor-provisioning only; doctors_insert_admin is what actually
+-- restricts it, this grant just makes the statement reachable at all.
+grant select, insert, update on public.doctors to authenticated;
+-- select only, and admins_select_own narrows that to the caller's own row.
+grant select on public.admins to authenticated;
 grant select, insert, update on public.patients to authenticated;
 grant select, insert, update on public.visits to authenticated;
 grant select, insert, update on public.consultations to authenticated;
@@ -999,3 +1055,17 @@ on conflict (email) do nothing;
 --
 -- Registration Desk accounts need no manual SQL at all — a signed-in doctor creates,
 -- resets, deactivates, or deletes them from Doctor Dashboard → Staff in the app.
+--
+-- Once an admin exists (below), doctor accounts need no manual SQL either — the admin
+-- page creates the Firebase user and the doctors row together, in one step.
+--
+-- To provision the FIRST admin (manual, one-time — by design there is no way to create
+-- an admin from inside the app, so an admin can never mint another admin):
+--   1. Firebase Console → Authentication → Users → Add user, with an email + password.
+--   2. Copy the generated UID, then run:
+--        insert into public.admins (firebase_uid, name, email)
+--        values ('<uid-from-firebase-console>', 'Admin Name', '<the email you used>');
+--
+-- Admins provision logins and nothing else: no policy in section 5 grants them
+-- patients, visits, consultations or payments, so an admin account cannot read a
+-- single medical record.

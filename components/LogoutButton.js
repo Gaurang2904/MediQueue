@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearPatientSession, clearDoctorSession, clearRegistrationSession } from "@/lib/auth";
+import { clearPatientSession, clearDoctorSession, clearRegistrationSession, clearAdminSession } from "@/lib/auth";
 import { logout } from "@/lib/firebaseAuth";
 
 export default function LogoutButton({ redirectTo = "/doctor/login", className }) {
@@ -22,6 +22,7 @@ export default function LogoutButton({ redirectTo = "/doctor/login", className }
       clearPatientSession();
       clearDoctorSession();
       clearRegistrationSession();
+      clearAdminSession();
       router.push(redirectTo);
     }
   }

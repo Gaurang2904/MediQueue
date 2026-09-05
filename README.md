@@ -32,6 +32,12 @@ verification, and a transaction dashboard.
   client SDK can't do those to another user's account. A handful of Netlify Functions
   under `netlify/functions/` handle exactly those four privileged calls (Firebase
   Admin SDK) — see "Staff account backend" below.
+- **Admin** is a fourth, provisioning-only role (`/admin/login`). It exists to create
+  doctor logins, and registration desk logins under any doctor — nothing else. It has
+  **no clinical reach at all**: no RLS policy grants an admin `patients`, `visits`,
+  `consultations` or `payments`, so an admin account cannot read a single medical
+  record. It also cannot edit or delete a doctor, and cannot create another admin —
+  admin rows are inserted by hand in the Supabase dashboard (see "Supabase setup").
 
 ## Running locally
 
@@ -79,6 +85,15 @@ bundle **at build time**. When deploying to Netlify, set the same variables in
    update public.doctors set firebase_uid = '<uid-from-firebase-console>'
    where email = 'drayesha@mediqueue.local';
    ```
+4. To provision the first **admin** (one-time, and the only way an admin is ever
+   created — there is deliberately no in-app path, so an admin can't mint another):
+   add a Firebase user as above, then:
+   ```sql
+   insert into public.admins (firebase_uid, name, email)
+   values ('<uid-from-firebase-console>', 'Admin Name', '<the email you used>');
+   ```
+   After that, further doctors need no manual SQL — Admin → Doctors creates the
+   Firebase login and the `doctors` row together.
 
 ## Staff account backend (Netlify Functions)
 

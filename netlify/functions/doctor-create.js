@@ -1,13 +1,14 @@
-// Callable by a doctor (creating a desk account for their own clinic, from Doctor
-// Dashboard -> Staff) or by an admin (creating one under any doctor, from the admin
-// page). This only mints the Firebase user; which clinic the account belongs to is
-// decided by the registration_staff insert the browser makes next, under RLS.
-const { admin, httpError, requireDoctorOrAdmin } = require("./_lib/adminAuth");
+// Creates the Firebase account for a new doctor. Admin-only, and deliberately the
+// mirror image of staff-create.js: this creates the auth user and returns its uid,
+// then the browser inserts the matching public.doctors row itself through the normal
+// Supabase client, gated by the doctors_insert_admin policy. Nothing here touches
+// Postgres with elevated privileges.
+const { admin, httpError, requireAdmin } = require("./_lib/adminAuth");
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method not allowed" };
   try {
-    await requireDoctorOrAdmin(event);
+    await requireAdmin(event);
     const { name, email, password } = JSON.parse(event.body || "{}");
     if (!name || !email || !password) {
       throw httpError(400, "Name, email, and password are required.");
@@ -21,6 +22,9 @@ exports.handler = async (event) => {
   } catch (err) {
     if (err.code === "auth/email-already-exists") {
       return { statusCode: 409, body: JSON.stringify({ message: "An account with this email already exists." }) };
+    }
+    if (err.code === "auth/invalid-email") {
+      return { statusCode: 400, body: JSON.stringify({ message: "Enter a valid email address." }) };
     }
     const statusCode = err.statusCode || 500;
     return { statusCode, body: JSON.stringify({ message: err.message || "Something went wrong." }) };
